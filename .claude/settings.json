@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/.claude/hooks/secret-guard.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/.claude/hooks/secret-guard.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/.claude/hooks/ha-yaml-check.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__homeassistant__ha_get_overview|mcp__homeassistant__ha_call_read_tool|mcp__homeassistant__ha_call_write_tool|mcp__homeassistant__ha_call_delete_tool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/.claude/hooks/block-ha-overview.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

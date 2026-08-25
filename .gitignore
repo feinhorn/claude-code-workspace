@@ -1,0 +1,18 @@
+# Credentials / secret-bearing files (never commit)
+.claude/settings.local.json
+.mcp.json
+
+# Runtime state, not project files
+.claude/hooks/.secret_taint
+.claude/hooks/__pycache__/
+.claude/scheduled_tasks.lock
+
+# Externally-proposed bundle, reviewed and declined
+.claude/hooks/secretguardhooks.zip
+
+# Personal files, unrelated to this workspace's config
+sav1522_filled_matured_bonds.pdf
+savings_bonds_inventory.csv
+
+# Stray broken directory from a shell variable-expansion bug
+$LOGDIR/
