@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Infrastructure Management — Flynn's Homelab
 
 This workspace runs Claude Code inside a Docker container on **Unraid** (`192.168.1.74`), purpose-built for direct infrastructure management of Flynn Einhorn's homelab: Unraid, UniFi networking, and adjacent Home Assistant systems. (GX55/Proxmox, a former secondary hypervisor, was decommissioned 2026-08-20 — unstable hardware. Unraid is the only hypervisor now. Caddy, a former internal reverse proxy, was decommissioned 2026-08-10 — services are reached by raw IP:port, no `*.lan` namespace.)
@@ -52,3 +56,16 @@ Deployed via Docker Compose (Unraid Compose Manager plugin), project file at `/m
 - **Notion** (`claude.ai Notion` connector + `notion` plugin skills/commands) — full read/write access to Flynn's Notion workspace.
 
 Given the combination of docker.sock + root SSH + Unraid API key, this container has effectively full control of the Unraid host — treat actions here with the same care as being logged into the host directly.
+
+## This repo's own architecture
+
+This repo *is* the container's Claude Code config (hooks, skills, MCP config) — there's no build/lint/test workflow; changes take effect on the next session/redeploy.
+
+**PreToolUse hook chain** (wired in `.claude/settings.json`): each hook reads the tool-call JSON from stdin and, to block, prints `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}` and exits 0 (a non-JSON stdout or non-zero exit is not a deny — it's a broken hook). Three independent hooks fire on different matchers:
+- `secret-guard.sh` (matcher: `Bash`, `Read`) — thin wrapper that shells out to `secret_guard_check.py` for the actual decision. The Python file exists because an earlier pure-bash/regex version had statement-boundary bugs on multi-line commands and heredocs; the rewrite does heredoc-aware statement splitting and quote-aware tokenizing (`shlex`). It denies reads/greps/cats of secret-bearing files (`.mcp.json`, `settings.local.json`, `secrets.yaml`, `.env`, SSH private keys, etc.) unless the invocation is a narrow, projected extraction (key names only, or via `secret_guard_check.py --redact <path>`), and separately carves out `sed -i` (in-place edits produce no stdout, so the generic content-leak rule doesn't apply — see the `SED_INPLACE_NO_PRINT_RE` comment for the incident that motivated it). `jq` is deliberately not relied on for anything load-bearing — it isn't installed in this container and ad-hoc `apt install`s don't survive redeploys.
+- `ha-yaml-check.sh` (matcher: `Write|Edit`) — deterministic subset of the `ha-yaml-linter` skill (deprecated top-level keys, tabs, missing `mode:`); the full semantic/Jinja2 checks live only in the skill, not here.
+- `block-ha-overview.sh` (matcher: the HA `ha_get_overview` tool and the `ha_call_{read,write,delete}_tool` proxies) — unconditionally denies `ha_get_overview` because its response embeds the live HA MCP token in `settings_url_hint`/`settings_url` regardless of field projection, and a PreToolUse hook can only gate the *input* of a call, not redact the *response*. Also inspects `tool_input.name` on the three proxy tools, since they can invoke `ha_get_overview` under a different top-level tool name that a name-only matcher would miss.
+
+**Skills** (`.claude/skills/*/SKILL.md`) encode HA/UniFi domain procedures the hooks can't (or shouldn't) enforce mechanically — e.g. `ha-yaml-linter` (full lint ruleset), `ha-dashboard-yaml` (pinned card-stack versions/syntax), `ha-audit` (phased audit workflow), `crowdsec-bouncer` (two distinct, unrelated root causes for the same symptom — diagnose before fixing), `scrub` (secret/PII redaction for anything about to leave this workspace).
+
+**Repo quirks worth knowing before touching the tree**: `sav1522_filled_matured_bonds.pdf` and `savings_bonds_inventory.csv` are personal files unrelated to this config, gitignored, not part of "the codebase." `$LOGDIR/` is a stray directory from a shell variable-expansion bug (literal `$LOGDIR`, unexpanded), also gitignored. `.claude/hooks/secretguardhooks.zip` is an externally-proposed hook bundle that was reviewed and declined — not live, kept for reference.
