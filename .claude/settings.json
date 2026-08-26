@@ -54,5 +54,29 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__phpipam__search_addresses",
+      "mcp__homeassistant__ha_call_read_tool",
+      "mcp__claude_ai_Notion__notion-fetch",
+      "mcp__homeassistant__ha_search",
+      "mcp__claude_ai_Notion__notion-search",
+      "mcp__homeassistant__ha_get_history",
+      "mcp__phpipam__get_subnet_details",
+      "mcp__homeassistant__ha_search_tools",
+      "mcp__homeassistant__ha_config_get_automation",
+      "mcp__claude_ai_Notion__notion-query-data-sources",
+      "mcp__paperless-ngx__get_document_content",
+      "mcp__phpipam__list_sections",
+      "mcp__paperless-ngx__list_documents",
+      "mcp__homeassistant__ha_get_state",
+      "mcp__homeassistant__ha_config_get_dashboard",
+      "mcp__paperless-ngx__get_statistics",
+      "mcp__paperless-ngx__get_document",
+      "mcp__plugin_context7_context7__query-docs",
+      "mcp__phpipam__get_section_subnets",
+      "mcp__homeassistant__ha_get_skill_guide"
+    ]
   }
 }

@@ -98,6 +98,8 @@ Repeatable, read-only-first homelab scripts distilled out of ad-hoc session work
 
 - `homelab-audit.sh` — data-collection sweep backing the `homelab-audit` skill: Docker container states (flags `Exited`/`Created`), recent per-container error-log hit counts, and (if `HA_URL`/`HA_TOKEN` are set) Home Assistant unavailable entities. Run it before classifying findings as BROKEN/NORMAL/ALREADY-RESOLVED against Notion — it does not touch Notion itself. Usage: `scripts/homelab-audit.sh [--dry-run] [--since 30m] [--log-file PATH]`.
 
+**When to add a new script here:** if a session's diagnosis/setup work runs ~20+ ad-hoc shell commands to establish a repeatable procedure (not a one-off fix), distill it into `scripts/<task>.sh` before the session ends — env-var secrets only, `--dry-run` support, timestamped step logging — and commit it. Otherwise the procedure only exists in that session's transcript and gets rediscovered from scratch next time.
+
 ## Working Style
 
 ### Response Length
