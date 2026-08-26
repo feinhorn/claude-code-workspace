@@ -29,18 +29,40 @@ Produce a plain list: `file:line — key name` for every hit. No values.
 
 ### 2. Generate service-specific rotation steps
 
-Each service rotates differently — don't apply a generic template blindly:
+Each service rotates differently — don't apply a generic template blindly. Steps marked **[verified]** come from a completed, Notion-logged rotation and can be followed as written. Steps marked **[confirm live]** are the best known starting point but the exact menu path hasn't been walked end-to-end recently — check the live UI before committing to a specific label, and tighten this section afterward with whatever you actually found (menus drift between versions).
 
-| Service | Rotation mechanism |
-|---|---|
-| Home Assistant | Profile → Security → Long-Lived Access Tokens: revoke the old token, create a new one. HA has no "regenerate in place" — old token is immediately invalid on delete. |
-| UniFi (OS Server API key) | Controller UI → Admins → API keys (or the `unifi_mcp` dedicated local admin's key) → revoke + reissue. Confirm the dedicated-account rule ([[feedback_homelab_safety_rules]]) still holds — don't fall back to a shared account. |
-| Unraid API key | Unraid webGUI → Settings → Management Access / API key section → reissue. |
-| Frigate camera password | Camera's own admin UI (or NVR-adjacent config) → change password → update Frigate's RTSP connection string. |
-| OpenAI | platform.openai.com → API keys → revoke old, create new. |
-| phpIPAM (`IPAM_DATABASE_PASS` / `PHPIPAM_APP_CODE`) | Per [[project_phpipam_infrastructure]] — MariaDB user password change via socket auth, then `config.php` patch (not full recreate) unless the memory notes say otherwise. |
+**phpIPAM — `PHPIPAM_APP_CODE`** (the MCP integration's static API app-code) **[verified 2026-08-26]**
+1. Log into the phpIPAM web UI (`$PHPIPAM_URL`) as an admin.
+2. **Administration → API.**
+3. Select the app entry matching this integration's `app_id` (`Claude`, per the AI+MCP subsystem card on the Notion hub) — confirm the name before editing if more than one app is listed.
+4. Regenerate/reset that app's code (look for a "Reset" action next to the App code field, or edit the app and clear the code to force regeneration — exact control varies by phpIPAM version).
+5. Copy the new code straight into `compose.yaml` yourself; don't paste it into any Claude Code tool call.
 
-If the service isn't in this table, ask the user for the rotation mechanism rather than guessing — never invent a rotation flow for a system this container doesn't have documented access to.
+**phpIPAM — `IPAM_DATABASE_PASS`** (MariaDB `phpipamuser`) **[verified 2026-08-21, see [[project_phpipam_infrastructure]] for full incident notes]**
+1. `docker exec -it mariadb mysql -u root` — this image allows passwordless local root via the Unix socket, no `-p`. The documented root password does **not** work.
+2. `SELECT User, Host FROM mysql.user WHERE User='phpipamuser';` — check for **more than one host row** (e.g. both `%` and a specific container IP). MariaDB matches the most specific host, so missing one leaves the old password live on that path.
+3. `ALTER USER 'phpipamuser'@'<host>' IDENTIFIED BY '<newpass>';` for **every** host row found.
+4. Update `IPAM_DATABASE_PASS` on both the `my-phpIPAM-www` and `my-phpIPAM-cron` Unraid containers, recreate both.
+5. Re-apply `$api_allow_unsafe = true;` in `/phpipam/config.php` after the `phpIPAM-www` recreate — no native env-var equivalent, gets wiped on every recreate. (`$trust_x_forwarded_headers` is now handled by `IPAM_TRUST_X_FORWARDED=true` and survives recreate on its own — no manual patch needed there anymore.)
+6. Back up first if convenient: `docker exec mariadb mysqldump -u phpipamuser -p'<pass>' phpipam > /mnt/user/appdata/phpipam-backups/phpipam-$(date +%Y%m%d).sql`.
+
+**Home Assistant** — two different credentials can both be called "the HA MCP token"; confirm which one before picking a path.
+- Core HA Long-Lived Access Token **[confirm live]**: profile (bottom-left avatar) → Security tab → Long-Lived Access Tokens → revoke old → Create Token. No regenerate-in-place — old token dies immediately on delete.
+- **HA MCP add-on** (port 9583 — what `/workspace/.mcp.json`'s `homeassistant.url` currently points to, as of 2026-08-26) **[unverified — exact menu path not yet documented]**: check the add-on's own config page (Settings → Add-ons, or Settings → Devices & Services, whichever surfaces it) rather than assuming it matches the core-HA path above. Once walked, record the actual steps here.
+
+**UniFi (OS Server API key)** **[confirm live]**
+Controller UI (`https://192.168.1.58:11443`) → the admin/API-key management section (exact current menu label not verified against this UI version) → the dedicated `unifi_mcp`-equivalent account → revoke + reissue. Confirm the dedicated-account rule ([[feedback_homelab_safety_rules]]) still holds — don't fall back to a shared account.
+
+**Unraid API key** **[verified 2026-08-21]**
+Unraid webGUI → Settings → Management Access → API Keys (or `unraid-api apikey --overwrite` at the Unraid console) → reissue. Afterward, verify `/boot/config/plugins/dynamix.my.servers/keys/` still has its other key files present — a past rotation once collaterally deleted unrelated ones.
+
+**Frigate camera password** **[verified 2026-08-21]**
+Reolink camera's own admin web UI/app at its IP (e.g. `192.168.2.161`) → change the password there first → then update the matching `FRIGATE_<CAM>_PASSWORD` Config field on the Frigate container in the Unraid Docker UI → recreate.
+
+**OpenAI**
+platform.openai.com → API keys → revoke old, create new. (Stable, publicly documented UI — not homelab-specific.)
+
+If the service isn't listed here, ask the user for the rotation mechanism rather than guessing — never invent a rotation flow for a system this container doesn't have documented access to.
 
 ### 3. Confirm before rotating
 
