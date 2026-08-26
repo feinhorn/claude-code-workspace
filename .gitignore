@@ -4,6 +4,7 @@
 
 # Runtime state, not project files
 .claude/hooks/.secret_taint
+.claude/hooks/.secret_scan_output.log
 .claude/hooks/__pycache__/
 .claude/scheduled_tasks.lock
 

@@ -314,8 +314,46 @@ def statement_mentions_sensitive_path(stmt, taint_cache):
 
 # ---------- redirect helpers (per statement, not per whole command) ----------
 
+HEREDOC_MARKER_TOKEN_RE = re.compile(r"^<<-?[\"']?\w+[\"']?$")
+
+
+def _redirect_info(stmt):
+    """Token-aware replacement for a raw string-tail regex.
+
+    Real incident (2026-08-26): ENDS_IN_REDIRECT_RE matched a bare '>' inside
+    a *quoted* sed replacement string (`.../<redacted>/gi'`) and mistook it
+    for a real shell redirect to a file named after the trailing quote/flags,
+    wrongly marking a content-leaking statement as "safe, redirected to a
+    file". A literal '>' can appear anywhere inside quoted text (redaction
+    placeholders like `<redacted>`/`<REMOVED>`, HTML-ish snippets, `a > b`
+    comparisons in scripts) without being a shell operator at all. shlex-based
+    tokenizing already strips quotes into single words, so a quoted chunk
+    containing '>' becomes one token that doesn't itself start with '>' --
+    checking the token stream instead of the raw string closes this class
+    generically, the same way `tokenize()` already fixed quoted-blob
+    mis-splitting elsewhere in this file.
+    """
+    toks = tokenize(stmt)
+    while toks and HEREDOC_MARKER_TOKEN_RE.match(toks[-1]):
+        toks.pop()
+    if not toks:
+        return False, None
+
+    last = toks[-1]
+    if last in (">", ">>"):
+        return False, None  # dangling operator, no target -- not a real redirect
+    if last.startswith(">>"):
+        return True, last[2:]
+    if last.startswith(">"):
+        return True, last[1:]
+    if len(toks) >= 2 and toks[-2] in (">", ">>"):
+        return True, last
+    return False, None
+
+
 def ends_in_redirect(stmt):
-    if not ENDS_IN_REDIRECT_RE.search(stmt):
+    is_redirect, _ = _redirect_info(stmt)
+    if not is_redirect:
         return False
     if TEE_RE.search(stmt):
         return False
@@ -325,8 +363,8 @@ def ends_in_redirect(stmt):
 
 
 def redirect_target(stmt):
-    m = ENDS_IN_REDIRECT_RE.search(stmt)
-    return m.group(1) if m else None
+    _, target = _redirect_info(stmt)
+    return target
 
 
 def keys_only_safe(stmt):
@@ -508,14 +546,24 @@ def check_content_leak(stmt, taint_cache):
                 "lines into the transcript. Use 'grep -n <pattern> <file>' for line numbers only, then edit "
                 "by line/pattern with sed, or read specific known-safe lines.")
 
-    is_redacted_pipe = bool(REDACTED_PIPE_RE.search(stmt))
+    # NOT trusted here (real incident, 2026-08-26): REDACTED_PIPE_RE only checks
+    # that the literal word "redacted" appears somewhere after `sed` -- it can't
+    # verify the sed pattern actually matches the secret's real shape. A `python3
+    # -c` one-liner printed .mcp.json's embedded HA MCP URL (secret is a bare
+    # `/private_XXXX` path segment, not a `token`/`Bearer`-prefixed value); the
+    # piped `sed 's/(Bearer |token...)...<redacted>/'` never matched that shape,
+    # so the real secret passed straight through to the transcript while this
+    # check waved it through on the word "redacted" alone. Ad-hoc sed/awk
+    # "redaction" of a sensitive-path statement is no longer trusted at all --
+    # only the tested `--redact` tool (SELF_REDACT_INVOKE_RE, checked above),
+    # a real redirect, or a genuine keys-only extraction are accepted.
     is_redirected = ends_in_redirect(stmt)
     is_keys_only = keys_only_safe(stmt)
 
     if is_redirected and not is_keys_only:
         taint_path(redirect_target(stmt), taint_cache)
 
-    if is_redacted_pipe or is_redirected or is_keys_only:
+    if is_redirected or is_keys_only:
         return None
 
     if has_grep:

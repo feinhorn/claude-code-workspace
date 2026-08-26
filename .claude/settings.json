@@ -41,6 +41,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspace/.claude/hooks/secret-scan-output.sh",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
