@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This workspace runs Claude Code inside a Docker container on **Unraid** (`192.168.1.74`), purpose-built for direct infrastructure management of Flynn Einhorn's homelab: Unraid, UniFi networking, and adjacent Home Assistant systems. (GX55/Proxmox, a former secondary hypervisor, was decommissioned 2026-08-20 — unstable hardware. Unraid is the only hypervisor now. Caddy, a former internal reverse proxy, was decommissioned 2026-08-10 — services are reached by raw IP:port, no `*.lan` namespace.)
 
+## Secret Handling (MANDATORY)
+
+- NEVER cat, grep, printenv, or otherwise dump files that may contain credentials (`.env`, `.mcp.json`, `config.docker.php`, `docker-compose.yml`, `*.conf`). Use `grep -c`, key-names-only (`printenv | cut -d= -f1`), or `sed 's/=.*/=<redacted>/'`.
+- When a secret must be read, pipe it directly to the consuming command; never echo it to stdout.
+- If a secret is exposed anyway, STOP, tell Flynn immediately, and log the rotation task in Notion before continuing.
+
+## Environment Boundaries
+
+Claude runs headless in this Linux container. Files on Flynn's local macOS machine (`kitty.conf`, iTerm/Ghostty configs, `~/Library`, local clipboard) are NOT reachable. If a task requires a local Mac file, say so immediately and produce a copy-paste block or a script for Flynn to run locally instead of guessing at root causes.
+
 ## Source of truth: Notion
 
 Notion is the canonical source of truth for this homelab, not this file. Primary hub: **"🌐 Homelab / Network"** (workspace: "Flynn Einhorn's Space"). Check Notion before and during infra work — don't rely solely on memory or this file, both can drift out of date.
@@ -31,6 +41,12 @@ This homelab has had **multiple confirmed incidents** of plaintext secrets (SSH 
 - Never type a password/API key directly into a Bash command, Edit call, or any other tool-call argument — those are visible in the transcript. Read/write credentials programmatically (e.g. a script that reads a config file into env vars) so the literal secret never appears in a tool call.
 - When querying UniFi's embedded MongoDB, always use a **projected** query for the specific field needed, never a full-document dump.
 - Treat any confirmed secret exposure as needing rotation — don't assume "nothing used it" is enough.
+
+## Documentation
+
+### Homelab Documentation Rule
+
+After any change to infrastructure (containers, backups, IPAM, UniFi, Home Assistant, irrigation), update the corresponding Notion page in the same session: what changed, why, current values, and rotation/next-action items. Cross-check Notion before proposing changes so we don't re-fix already-resolved items.
 
 ## Infrastructure map
 
@@ -69,3 +85,19 @@ This repo *is* the container's Claude Code config (hooks, skills, MCP config) �
 **Skills** (`.claude/skills/*/SKILL.md`) encode HA/UniFi domain procedures the hooks can't (or shouldn't) enforce mechanically — e.g. `ha-yaml-linter` (full lint ruleset), `ha-dashboard-yaml` (pinned card-stack versions/syntax), `ha-audit` (phased audit workflow), `crowdsec-bouncer` (two distinct, unrelated root causes for the same symptom — diagnose before fixing), `scrub` (secret/PII redaction for anything about to leave this workspace).
 
 **Repo quirks worth knowing before touching the tree**: `sav1522_filled_matured_bonds.pdf` and `savings_bonds_inventory.csv` are personal files unrelated to this config, gitignored, not part of "the codebase." `$LOGDIR/` is a stray directory from a shell variable-expansion bug (literal `$LOGDIR`, unexpanded), also gitignored. `.claude/hooks/secretguardhooks.zip` is an externally-proposed hook bundle that was reviewed and declined — not live, kept for reference.
+
+## `scripts/`
+
+Repeatable, read-only-first homelab scripts distilled out of ad-hoc session work, so setup/check steps don't get rediscovered from transcripts each time. All read secrets from env vars only (never hardcoded), support `--dry-run`, and log each step with a timestamp.
+
+- `homelab-audit.sh` — data-collection sweep backing the `homelab-audit` skill: Docker container states (flags `Exited`/`Created`), recent per-container error-log hit counts, and (if `HA_URL`/`HA_TOKEN` are set) Home Assistant unavailable entities. Run it before classifying findings as BROKEN/NORMAL/ALREADY-RESOLVED against Notion — it does not touch Notion itself. Usage: `scripts/homelab-audit.sh [--dry-run] [--since 30m] [--log-file PATH]`.
+
+## Working Style
+
+### Response Length
+
+Keep responses under ~400 output tokens. For long audits, backup reports, or config dumps, write the full detail to a file or a Notion page and reply with a short summary plus the link.
+
+### Background Agents
+
+Do not launch background/code-review agents that can edit or push under Flynn's git identity. If parallel work is genuinely needed, ask first and scope the agent to read-only exploration.
