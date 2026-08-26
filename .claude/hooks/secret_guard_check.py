@@ -698,17 +698,21 @@ def _redact_scalar(v):
 
 
 def _redact_json(obj, parent_key=None):
+    # Bug found via testing (2026-08-26): the old version only checked
+    # SECRET_KEY_NAME_RE at the dict level, against a directly-string-valued
+    # key -- a list of secret strings under a matching key (e.g.
+    # "api_keys": ["sk-...", "sk-..."]) recursed into the list branch with
+    # the key-name check never applied to its string elements, so every
+    # value printed in full plaintext. Checking parent_key at the STRING
+    # leaf (regardless of how many list/dict levels it took to get there)
+    # closes this for any nesting shape, not just one more special case.
     if isinstance(obj, dict):
-        out = {}
-        for k, v in obj.items():
-            if isinstance(v, str) and SECRET_KEY_NAME_RE.search(str(k)):
-                out[k] = "***REDACTED***"
-            else:
-                out[k] = _redact_json(v, k)
-        return out
+        return {k: _redact_json(v, k) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_redact_json(v, parent_key) for v in obj]
     if isinstance(obj, str):
+        if parent_key is not None and SECRET_KEY_NAME_RE.search(str(parent_key)):
+            return "***REDACTED***"
         return _redact_scalar(obj)
     return obj
 
