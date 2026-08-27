@@ -36,14 +36,14 @@ Each service rotates differently — don't apply a generic template blindly. Ste
 2. **Administration → API.**
 3. Select the app entry matching this integration's `app_id` (`Claude`, per the AI+MCP subsystem card on the Notion hub) — confirm the name before editing if more than one app is listed.
 4. Regenerate/reset that app's code (look for a "Reset" action next to the App code field, or edit the app and clear the code to force regeneration — exact control varies by phpIPAM version).
-5. Copy the new code straight into `compose.yaml` yourself; don't paste it into any Claude Code tool call.
+5. Copy the new code straight into `/root/.claude.json` yourself (the phpIPAM MCP integration is registered via `claude mcp add`, per [[project_phpipam_infrastructure]] — the credential lives there, not in any compose file); don't paste it into any Claude Code tool call.
 
 **phpIPAM — `IPAM_DATABASE_PASS`** (MariaDB `phpipamuser`) **[verified 2026-08-21, see [[project_phpipam_infrastructure]] for full incident notes]**
 1. `docker exec -it mariadb mysql -u root` — this image allows passwordless local root via the Unix socket, no `-p`. The documented root password does **not** work.
 2. `SELECT User, Host FROM mysql.user WHERE User='phpipamuser';` — check for **more than one host row** (e.g. both `%` and a specific container IP). MariaDB matches the most specific host, so missing one leaves the old password live on that path.
 3. `ALTER USER 'phpipamuser'@'<host>' IDENTIFIED BY '<newpass>';` for **every** host row found.
 4. Update `IPAM_DATABASE_PASS` on both the `my-phpIPAM-www` and `my-phpIPAM-cron` Unraid containers, recreate both.
-5. Re-apply `$api_allow_unsafe = true;` in `/phpipam/config.php` after the `phpIPAM-www` recreate — no native env-var equivalent, gets wiped on every recreate. (`$trust_x_forwarded_headers` is now handled by `IPAM_TRUST_X_FORWARDED=true` and survives recreate on its own — no manual patch needed there anymore.)
+5. Re-apply `$api_allow_unsafe = true;` in `/phpipam/config.docker.php` (not `config.php` — that name is wrong, per [[project_phpipam_infrastructure]]) after the `phpIPAM-www` recreate — no native env-var equivalent, gets wiped on every recreate. (`$trust_x_forwarded_headers` is now handled by `IPAM_TRUST_X_FORWARDED=true` and survives recreate on its own — no manual patch needed there anymore.)
 6. Back up first if convenient: `docker exec mariadb mysqldump -u phpipamuser -p'<pass>' phpipam > /mnt/user/appdata/phpipam-backups/phpipam-$(date +%Y%m%d).sql`.
 
 **Home Assistant** — two different credentials can both be called "the HA MCP token"; confirm which one before picking a path.

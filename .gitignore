@@ -17,3 +17,6 @@ savings_bonds_inventory.csv
 
 # Stray broken directory from a shell variable-expansion bug
 $LOGDIR/
+
+# Playwright MCP browser automation traces/console logs, not project files
+.playwright-mcp/
