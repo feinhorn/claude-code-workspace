@@ -53,6 +53,7 @@ KNOWN_PREFIX_PATTERNS = [
 # positive costs a glance, not a blocked workflow.
 ENTROPY_CANDIDATE_RE = re.compile(r"[A-Za-z0-9+/_=-]{24,}")
 ENTROPY_THRESHOLD = 4.0  # bits/char; random base64/hex sits ~4.0-6.0, English text ~3.0-3.5
+ASSIGNMENT_PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.\-]*[:=]")
 
 
 def shannon_entropy(s):
@@ -65,6 +66,23 @@ def shannon_entropy(s):
     return -sum((n / length) * math.log2(n / length) for n in counts.values())
 
 
+def strip_assignment_prefix(s):
+    """`VARNAME=value` / `VARNAME:value` -> `value`.
+
+    The variable NAME is real English-ish text; bundled with its value into
+    one entropy candidate it both inflates the length past the threshold and
+    can drag a benign value over the bits/char bar (or, the reverse, a long
+    boring name can mask a short real secret's own entropy). The value on its
+    own is still measured -- this only drops the name half. Real incident:
+    `UNRAID_API_KEY=abcdef123456` (a dummy) warned as one 27-char blob.
+    """
+    # Only a leading `identifier=` / `identifier:` -- NOT a bare '=' or ':'
+    # anywhere in the run, since '=' is also base64 padding and ':' shows up
+    # inside real tokens. `+`/`/` in the run stop the identifier match, so a
+    # base64 blob is left fully intact.
+    return ASSIGNMENT_PREFIX_RE.sub("", s, count=1)
+
+
 def looks_like_low_entropy_noise(s):
     # Common false-positive shapes: git commit hashes / hex digests (pure
     # hex, no mixed-case+digit variety needed for a real secret), and
@@ -72,6 +90,17 @@ def looks_like_low_entropy_noise(s):
     if re.fullmatch(r"[0-9a-f]{24,}", s, re.I):
         return True
     if len(set(s)) <= 3:
+        return True
+    # Low character diversity: a real random secret exercises most of its
+    # alphabet; padded / sequential / repeated test values
+    # ("AAAABBBBCCCCDDDD...", "ABABABAB...") do not. 0.30 is well below where
+    # real 32-char hex (~0.5) or base64 (~0.6+) tokens sit.
+    if len(s) >= 20 and len(set(s)) / len(s) < 0.30:
+        return True
+    # Filesystem-path / plain-URL shape: 2+ '/' separators and no base64
+    # padding chars. A genuine URL-embedded credential is still caught by the
+    # KNOWN_PREFIX 'private_' / 'Bearer' / JWT patterns regardless of this.
+    if s.count("/") >= 2 and "+" not in s and "=" not in s:
         return True
     return False
 
@@ -91,10 +120,14 @@ def scan_text(text):
 
     for m in ENTROPY_CANDIDATE_RE.finditer(text):
         s = m.group()
-        if looks_like_low_entropy_noise(s):
+        core = strip_assignment_prefix(s)
+        if len(core) < 24:
+            # value half alone is short -- the length came from the var name
             continue
-        if shannon_entropy(s) >= ENTROPY_THRESHOLD:
-            findings.append(("high-entropy string", redacted_preview(s)))
+        if looks_like_low_entropy_noise(core):
+            continue
+        if shannon_entropy(core) >= ENTROPY_THRESHOLD:
+            findings.append(("high-entropy string", redacted_preview(core)))
 
     return findings
 
@@ -129,6 +162,22 @@ def main():
         sys.exit(0)
 
     tool_name = payload.get("tool_name", "") or ""
+
+    # This repo's own hook directory holds the secret-guard source (full of
+    # credential-shaped REGEX PATTERN strings) and its regression tests (full
+    # of deliberately fake secrets -- dummy AWS keys, `AAAA...` blobs, sample
+    # `/private_` URLs). Reading those files reliably trips this scanner with
+    # nothing real behind it, which trains the reader to wave the warning
+    # away -- the opposite of what a second-line alarm is for. A real secret
+    # committed into a file here would be a separate incident caught by the
+    # PreToolUse git-staging checks, not something this PostToolUse pass can
+    # do anything about anyway. Scope the skip narrowly: Read only, this one
+    # directory only.
+    ti = payload.get("tool_input", {}) or {}
+    fp = ti.get("file_path", "") if isinstance(ti, dict) else ""
+    if tool_name == "Read" and isinstance(fp, str) and "/.claude/hooks/" in fp:
+        sys.exit(0)
+
     text = extract_output_text(payload)
     if not text:
         sys.exit(0)
