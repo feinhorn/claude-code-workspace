@@ -145,8 +145,10 @@ verify_key() {
             code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 \
                 -H "X-API-KEY: ${newkey}" http://192.168.1.48:6767/api/system/status) ;;
         sabnzbd)
-            body=$(curl -sk --max-time 10 "http://192.168.1.39:8080/api?mode=version&output=json&apikey=${newkey}")
-            case "$body" in *'"version"'*) code=200 ;; *) code=401 ;; esac ;;
+            # mode=queue requires a valid api_key (mode=version does not), so
+            # this actually proves the new key works, not just that SAB is up
+            body=$(curl -sk --max-time 10 "http://192.168.1.39:8080/api?mode=queue&output=json&apikey=${newkey}")
+            case "$body" in *'"queue"'*) code=200 ;; *) code=401 ;; esac ;;
         tautulli)
             body=$(curl -sk --max-time 10 "http://192.168.1.34:8181/api/v2?cmd=arnold&apikey=${newkey}")
             case "$body" in *'"result": "success"'*|*'"result":"success"'*) code=200 ;; *) code=401 ;; esac ;;
@@ -174,8 +176,10 @@ probe_reachable() {
 }
 
 wait_for_verify() {
-    local name="$1" newkey="$2" i
-    for i in $(seq 1 30); do
+    # VERIFY_TRIES x 2s. Default 30 (60s); bump for slow-booting containers
+    # like binhex-sabnzbdvpn which brings up a VPN before the web UI.
+    local name="$1" newkey="$2" i tries="${VERIFY_TRIES:-30}"
+    for i in $(seq 1 "$tries"); do
         verify_key "$name" "$newkey" && return 0
         sleep 2
     done
