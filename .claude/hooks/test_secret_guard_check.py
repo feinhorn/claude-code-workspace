@@ -148,6 +148,110 @@ def _t12():
         assert "abcdef123456" not in out and "deadbeefcafe" not in out
 
 
+# ==========================================================================
+# FALSE-POSITIVE REDUCTION round (2026-08-28) + paired false-negative guards.
+#
+# Corpus is split into two labelled halves and asserted as a set so a future
+# pattern change that trades an FP fix for an FN regression fails loudly.
+# No real credentials in any sample -- every "secret" value is a dummy.
+# ==========================================================================
+
+_SENS = "/workspace/" + "serv" + "ices.yaml"
+_MCP = "/workspace/." + "mcp" + ".json"
+
+
+def _verdict(cmd):
+    """Mirror main()'s per-statement dispatch; return the first deny reason."""
+    taint = set()
+    stmts = m.split_statements(cmd)
+    for s in stmts:
+        m.process_copy_taint(s, taint)
+    for s in stmts:
+        for fn in (
+            m.check_credential_shape,
+            lambda x: m.check_git_secrets(x, taint),
+            m.check_other_rules,
+            lambda x: m.check_content_leak(x, taint),
+        ):
+            r = fn(s)
+            if r:
+                return r
+    return None
+
+
+# ---- KNOWN-CLEAN half: these must NOT be blocked ----
+CLEAN_SAMPLES = {
+    "grep -c count-only on a secret file": "grep -c 'key:' " + _SENS,
+    "grep --count long form": "grep --count key " + _MCP,
+    "heredoc write, space-separated marker": "cat > /workspace/x." + "env << 'EOF'\nFOO=bar\nEOF",
+    "heredoc write, attached marker": "cat > /workspace/x." + "env <<'EOF'\nFOO=bar\nEOF",
+    "docker inspect Env piped to name-only cut": (
+        'docker inspect claude-code --format "{{range .Config.Env}}{{println .}}{{end}}" | cut -d= -f1'
+    ),
+    "self --redact invocation": (
+        "python3 /workspace/.claude/hooks/secret_guard_check.py --redact " + _SENS
+    ),
+}
+
+# ---- KNOWN-SECRET half: these must stay blocked (FN guards) ----
+SECRET_SAMPLES = {
+    "grep -n prints matching lines": "grep -n 'key:' " + _SENS,
+    "sed -n range print": "sed -n '1,5p' " + _MCP,
+    "plain cat": "cat " + _MCP,
+    "claude mcp list unredacted": "claude mcp list",
+    "grep -o value wildcard": "grep -oE 'key: .*' " + _SENS,
+}
+
+
+@test("FP corpus: every known-clean sample is allowed")
+def _fp_clean():
+    bad = {k: _verdict(v) for k, v in CLEAN_SAMPLES.items() if _verdict(v)}
+    assert not bad, f"false positives: {list(bad)}"
+
+
+@test("FN corpus: every known-secret sample stays blocked")
+def _fn_secret():
+    leaked = [k for k, v in SECRET_SAMPLES.items() if _verdict(v) is None]
+    assert not leaked, f"false negatives (leaked): {leaked}"
+
+
+@test("heredoc initiator with spaced marker reads as a redirect")
+def _heredoc_redirect():
+    assert m.ends_in_redirect("cat > /tmp/f << 'EOF'") is True
+    assert m.ends_in_redirect("cat > /tmp/f <<'EOF'") is True
+    assert m.redirect_target("cat > /tmp/f << 'EOF'") == "/tmp/f"
+    # a real trailing redirect target is still not swallowed
+    assert m.ends_in_redirect("echo hi > /tmp/plain.txt") is True
+
+
+@test("grep -c count path does not rescue a content-printing pipeline")
+def _count_not_overbroad():
+    # -c next to a real content-printing statement: the cat statement is
+    # split out and evaluated on its own, and must still be blocked.
+    assert _verdict("grep -c key " + _MCP + " ; cat " + _MCP) is not None
+
+
+@test("FN guard: bare /private_ URL token is redacted by --redact text path")
+def _fn_private_url():
+    out = m._redact_text("    url: http://ha.local/private_abcd1234efgh5678ijkl\n")
+    assert "private_abcd1234efgh5678ijkl" not in out and "REDACTED" in out
+
+
+@test("FN guard: multi-line YAML block-scalar secret is fully masked")
+def _fn_block_scalar():
+    pem = (
+        "  private_key: |\n"
+        "    -----BEGIN RSA PRIVATE KEY-----\n"
+        "    AAAABBBBCCCCDDDD\n"
+        "    -----END RSA PRIVATE KEY-----\n"
+        "  next: value\n"
+    )
+    out = m._redact_text(pem)
+    assert "BEGIN RSA PRIVATE KEY" not in out
+    assert "AAAABBBBCCCCDDDD" not in out
+    assert "next: value" in out  # redaction stops at the block boundary
+
+
 def main():
     passed, failed = 0, 0
     for name, fn in FAILURES:

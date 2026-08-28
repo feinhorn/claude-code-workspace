@@ -45,6 +45,17 @@ GREP_CONTEXT_FLAGS_RE = re.compile(
 )
 GREP_ONLY_MATCHING_RE = re.compile(r"(^|[\s])(-[A-Za-z]*o[A-Za-z]*([\s]|$)|--only-matching\b)")
 GREP_VALUE_WILDCARD_RE = re.compile(r"\.\*|\.\+|\[\^")
+# `grep -c` / `grep --count` prints ONLY a per-file match count (an integer),
+# never a matching line -- so it can't leak a KEY=VALUE or `key: <secret>`
+# line into the transcript even against a secret-bearing file. This is the
+# safe way to answer "does this file still contain X / how many hits", which
+# previously forced a redirect-to-file dance or a bespoke host-side script
+# (a contributing factor in the 2026-08-28 read-back friction). `-c` suppresses
+# line output in grep regardless of any other flag, so no extra guarding is
+# needed. `-o`/`--only-matching` is intentionally NOT treated the same way:
+# `grep -o` without `-c` prints the matched substring, which for a value
+# wildcard pattern is the secret itself.
+GREP_COUNT_ONLY_RE = re.compile(r"(^|\s)(-[A-Za-z]*c[A-Za-z]*|--count)(\s|$)")
 REDACTED_PIPE_RE = re.compile(r"\bsed\b.*REDACTED", re.I)
 # `sed -i` edits the file in place and (absent -n + an explicit `p` command,
 # which is unusual and easy to eyeball-catch separately) produces NO stdout
@@ -334,8 +345,26 @@ def _redirect_info(stmt):
     mis-splitting elsewhere in this file.
     """
     toks = tokenize(stmt)
-    while toks and HEREDOC_MARKER_TOKEN_RE.match(toks[-1]):
-        toks.pop()
+    # Strip a trailing heredoc marker so `cat > file <<EOF` still reads as a
+    # redirect to `file`. Both spellings occur: the attached form `<<'EOF'`
+    # (one shlex token) and the space-separated form `<< 'EOF'` (two tokens,
+    # `<<` then `EOF`) -- the latter was NOT recognized before, so a
+    # legitimate heredoc write to a newly-protected path got wrongly denied
+    # (documented FP, adversarial testing 2026-08-21). `<<` unambiguously
+    # starts a heredoc in shell, so consuming the delimiter word after it is
+    # safe and never hides a real output redirect.
+    while toks:
+        if HEREDOC_MARKER_TOKEN_RE.match(toks[-1]):
+            toks.pop()
+            continue
+        if len(toks) >= 2 and toks[-2] in ("<<", "<<-"):
+            toks.pop()
+            toks.pop()
+            continue
+        if toks[-1] in ("<<", "<<-"):
+            toks.pop()
+            continue
+        break
     if not toks:
         return False, None
 
@@ -539,6 +568,10 @@ def check_content_leak(stmt, taint_cache):
         if all(t.lower() == "sed" for t in other_content_tools):
             if SED_INPLACE_NO_PRINT_RE.search(stmt) and not SED_EXPLICIT_PRINT_RE.search(stmt):
                 return None
+
+    if has_grep and not has_content_tool and GREP_COUNT_ONLY_RE.search(stmt):
+        # count-only: grep emits just an integer per file, no matching lines
+        return None
 
     if has_grep and GREP_CONTEXT_FLAGS_RE.search(stmt):
         return ("Blocked: grep with -A/-B/-C context flags against a file known to hold plaintext secrets "
