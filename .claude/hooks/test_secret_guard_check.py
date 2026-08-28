@@ -114,6 +114,40 @@ def _t8():
     assert redacted["credentials"]["password"] == "***REDACTED***"
 
 
+# ---------- _redact_text: bare `key:` YAML fields (Homepage services.yaml) ----------
+# Real leak 2026-08-28: `--redact` on Homepage's services.yaml printed ~10
+# widget API keys in plaintext. The fields are named bare `key:` (not
+# `api_key`), which SECRET_KEY_NAME_RE didn't match.
+
+@test("--redact redacts a bare `key:` YAML value")
+def _t9():
+    src = "  widget:\n    type: sonarr\n    url: http://192.168.1.41:8989\n    key: 27eded90434e4a44967ba82dd3c3557e\n"
+    out = m._redact_text(src)
+    assert "27eded90434e4a44967ba82dd3c3557e" not in out, out
+    assert "***REDACTED***" in out
+
+
+@test("--redact redacts a secret in a `# key: ...` YAML comment")
+def _t10():
+    out = m._redact_text("# key: TaxBDu6iWXmeom7La689\n")
+    assert "TaxBDu6iWXmeom7La689" not in out, out
+
+
+@test("--redact does NOT over-redact words merely containing 'key'")
+def _t11():
+    for safe in ("  monkey: banana\n", "  keyboard: qwerty\n", "  turnkey_mode: true\n"):
+        out = m._redact_text(safe)
+        assert "***REDACTED***" not in out, (safe, out)
+
+
+@test("--redact still redacts UNRAID_API_KEY / app_code KV lines (no regression)")
+def _t12():
+    for line in ("  - UNRAID_API_KEY=abcdef123456\n", "  PHPIPAM_APP_CODE: deadbeefcafe\n"):
+        out = m._redact_text(line)
+        assert "***REDACTED***" in out, (line, out)
+        assert "abcdef123456" not in out and "deadbeefcafe" not in out
+
+
 def main():
     passed, failed = 0, 0
     for name, fn in FAILURES:

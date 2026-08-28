@@ -681,7 +681,13 @@ SECRET_KEY_NAME_RE = re.compile(
     # --redact when reading compose.yaml. Scoped to "app_code"/"app-code" (not
     # bare "code") to avoid false-positiving on unrelated fields like
     # STATUS_CODE/ZIP_CODE/COUNTRY_CODE.
-    r"app[_-]?code",
+    r"app[_-]?code|"
+    # Real leak 2026-08-28: Homepage's services.yaml names every widget API
+    # key / Plex token / Unraid+UniFi key with a bare `key:` field -- none of
+    # the patterns above match "key" on its own, so `--redact` printed ~10 of
+    # them in plaintext. Word-boundaried so it hits `key:` / `- key =` but not
+    # `monkey`, `keyboard`, `turnkey`, or `api_key` (already covered above).
+    r"\bkeys?\b",
     re.I
 )
 URL_TOKEN_SUB_RE = re.compile(
@@ -725,7 +731,9 @@ def _redact_json(obj, parent_key=None):
 # adjacency to `=`/`:` -- a plain `api[_-]?key=` adjacency match (as used by
 # URL_TOKEN_SUB_RE) misses real key names like UNIFI_NETWORK_API_KEY_CONTAINER
 # where something follows "KEY" before the separator.
-KV_LINE_RE = re.compile(r'^(\s*(?:-\s+)?)([\w.\-]+)(\s*[:=]\s*)(.+)$')
+# Optional leading `#` so secrets sitting in a YAML/conf comment
+# (`# key: <token>`, seen in Homepage's services.yaml header) are caught too.
+KV_LINE_RE = re.compile(r'^(\s*(?:#+\s*)?(?:-\s+)?)([\w.\-]+)(\s*[:=]\s*)(.+)$')
 XML_CONFIG_RE = re.compile(r'(<Config\b[^>]*Name="([^"]*)"[^>]*>)([^<]*)(</Config>)', re.I)
 
 
