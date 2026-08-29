@@ -51,8 +51,17 @@ confirm each item against live state — git branch / HEAD, deployed-vs-committe
 parity, container health, entity IDs, current config values. Log the result of every
 check in the execution record.
 
-- If a section-E check **contradicts** the packet: stop and tell Flynn. The packet is
-  wrong and the task is likely mis-scoped.
+- If a section-E check **substantively contradicts** the packet — a named container,
+  path, entity, HEAD, or config value is not what the packet claims — stop and tell
+  Flynn. The packet is wrong and the task is likely mis-scoped.
+- **Expected divergence is not a contradiction.** Section E sometimes restates the
+  task's *pre-execution* state ("Status is still `Intake`", "Section 2 is empty",
+  "checklist unchecked"). Reaching this skill at all means the readiness gate passed,
+  so that state has legitimately moved on. Log the current value and continue — do not
+  stop. The live facts worth verifying are execution-time facts (branch, deployed-vs-
+  committed parity, container health, identifiers, current config values), never the
+  starting conditions. A well-authored section E lists only the former; when it lists
+  the latter, treat those bullets as context, not as a gate.
 - If the packet has **no section E** (predates the convention): do a minimal live-state
   check of the systems it names, and note that.
 
