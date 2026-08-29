@@ -1,0 +1,121 @@
+---
+name: eng-task
+description: Execute a task from the Notion "Engineering Tasks" database end to end — load the context packet, do the approved work, validate, adversarially review, and sync the closure record back to Notion over MCP. Use when Flynn runs `/eng-task <task page url, id, or name>`, or points you at an Engineering Tasks page and says run it / execute it / do the task. Triggers on 'eng-task', 'engineering task', 'run the task', 'execute the Notion task', 'do the Notion engineering task'.
+---
+
+# Engineering Task Execution
+
+This skill **is** Steps 3–5 of the "⚙️ AI-Assisted Infrastructure Workflow" SOP.
+You do not need to open that page — everything you must do is below.
+
+Input: a **Notion Engineering Tasks page** (URL, page ID, or exact task name).
+
+## 0. Load the task
+
+1. `notion-fetch` the page. Read **Section 2 (the context packet)** in full, plus the
+   **Task Type**, **System**, **Risk Level**, and **Constraints & Boundaries** properties.
+2. If Section 2 is empty or still the placeholder text, **stop** — the task is not
+   Context Ready. Tell Flynn to run Step 2 (Notion AI context packet) first.
+3. Set **Status → In Progress** via `notion-update-page`.
+
+## 1. Trust-but-verify — the ONLY context work you spend tokens on
+
+The context packet is the knowledge layer's finished product. **Trust sections A–D.**
+Do **not** re-derive them by re-reading Notion pages or sweeping the repo — that is
+the token waste this workflow exists to avoid.
+
+Your one job here: walk **packet section E ("Live facts to verify in session")** and
+confirm each item against live state — git branch / HEAD, deployed-vs-committed
+parity, container health, entity IDs, current config values. Log the result of every
+check in the execution record.
+
+- If a section-E check **contradicts** the packet: stop and tell Flynn. The packet is
+  wrong and the task is likely mis-scoped.
+- If the packet has **no section E** (predates the convention): do a minimal live-state
+  check of the systems it names, and note that.
+
+## 2. Execute
+
+Stay inside the packet's approved scope. **Scope escalation is the named primary
+failure mode of this workflow** — rotating a credential, editing an unrelated config,
+or sweeping the filesystem when the task did not ask for it requires fresh explicit
+approval.
+
+Task-type shape:
+
+- **Fix** — reproduce or characterise the defect *first*; smallest coherent change;
+  a regression test that fails before and passes after.
+- **Investigate** — evidence-preserving, discriminating checks only. **Do not implement
+  a change** unless Section 2 explicitly approves one. Deliverable is findings + a
+  recommended follow-up task.
+- **Build New** — confirm the capability does not already exist; house conventions
+  (Community Applications templates only for containers, credential-per-trust-boundary,
+  no WAN exposure of management surfaces); plan backup, monitoring, ingress, rollback,
+  teardown before building.
+- **Migrate** — preflight the target, back up the source, cut over, verify data
+  integrity, hold a rollback window before retiring the source.
+- **Retire** — prove zero active consumers and approved retention, then only reversible
+  shutdown / cleanup steps.
+
+**Hard stops** (CLAUDE.md + SOP Hard Rule) — stop and get explicit approval before:
+destructive commands, production applies, credential rotation, firing an irrigation
+valve / master switch, restarting Home Assistant, deleting entities / automations /
+scripts / history. Never `grep -r` broadly on the live Unraid host (single combined
+pattern, `grep -rlI`, `--exclude-dir` for plex/frigate/media/`*.db`, `ionice -c3`, ask
+first). Never type a secret into a tool-call argument.
+
+**Risk Level** gates autonomy:
+- **Low** — proceed through validation on your own; still honour the hard-stop list.
+- **Medium** — same, but announce each irreversible step before taking it.
+- **High / Emergency** — checkpoint with Flynn before the first change that touches
+  live state, and dry-run / rehearse the rollback command before applying.
+
+## 3. Validate
+
+Universal (every task):
+- linter / syntax / configuration checks pass
+- no secret in any command, output, fixture, or doc
+- scope stayed inside the packet
+- rollback / restore procedure written as a concrete command and verified
+
+Then run the matching **Section 4** task-type checklist from the page.
+
+Review:
+- **Material code change** → run `/security-review` and `/code-review high`.
+- **Non-code change** → run the adversarial-review prompt in Section 4 of the page.
+- Classify findings **Blocker / Important / Minor**. Blockers must be fixed or
+  explicitly waived by Flynn before closure.
+
+## 4. Human sign-off
+
+Present to Flynn: the diff / change summary, validation evidence, the concrete
+rollback command, and all review findings.
+
+**Do not apply to production and do not close the task until Flynn explicitly
+approves.** `git push` only on explicit confirmation; never force-push `main`.
+
+## 5. Closure sync (over MCP)
+
+After sign-off:
+
+1. **Scrub first.** Run the `scrub` skill over everything about to be written to
+   Notion — execution log, diff summary, command output. No credential-shaped string
+   reaches a Notion page. Non-negotiable ([[feedback_homelab_credential_handling]]).
+2. Write into the task page via `notion-update-page`:
+   - **Section 3** — working dir, session date, files modified, commands executed, diff summary.
+   - **Section 4** — validation evidence and review findings.
+   - **Section 5** — durable closure record following the compiled **Closure Prompt**
+     structure: outcome + rationale, what changed, validation evidence, rollback /
+     restore procedure, monitoring window.
+3. **Canonical docs — hard gate.** Update the affected subsystem page(s) and the infra
+   map in Notion with verified live state, per CLAUDE.md's Homelab Documentation Rule,
+   and add a session-capsule / change-log entry. If nothing needed updating, say so
+   explicitly and why.
+4. **Status → In Review.** **Do not set Closed** — only Flynn closes, after final
+   verification.
+5. If a credential was exposed or rotated at any point, run the `rotate` skill and log it.
+
+## Working directory
+
+This container works in `/workspace` (the `.claude` config tree). Host operations go
+over SSH to `root@192.168.1.74`. Ignore any `/mnt/user/...` default in an older template.
