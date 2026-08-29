@@ -17,9 +17,9 @@ create the row instead of executing:
 
 1. `notion-create-pages` under data source `collection://3c5a7685-6021-4de3-8224-db561b552ff4`
    with **Task / Objective** = the objective, **Status** = `Intake`.
-2. Ask Flynn for **Task Type**, **System**, **Risk Level**, and any **Constraints &
-   Boundaries** — set them via `notion-update-page`. Do not guess Task Type; it shapes
-   every downstream prompt.
+2. Ask Flynn for **Task Type**, **System**, and any **Constraints & Boundaries** — set
+   them via `notion-update-page`. Do not guess Task Type; it shapes every downstream
+   prompt.
 3. Apply the `New Engineering Task` template (`template_id` `e01a1f96-61d6-4deb-a31e-6d9171803427`)
    so Sections 1–5 exist on the page.
 4. Stop. Tell Flynn the page URL and that Step 2 (Notion AI context packet) is next —
@@ -28,9 +28,16 @@ create the row instead of executing:
 ## 0. Load the task
 
 1. `notion-fetch` the page. Read **Section 2 (the context packet)** in full, plus the
-   **Task Type**, **System**, **Risk Level**, and **Constraints & Boundaries** properties.
-2. If Section 2 is empty or still the placeholder text, **stop** — the task is not
-   Context Ready. Tell Flynn to run Step 2 (Notion AI context packet) first.
+   **Task Type**, **System**, and **Constraints & Boundaries** properties.
+2. **Readiness gate — if any of these fail, stop and tell Flynn what's missing.** Do
+   not fix them yourself and do not proceed on a "close enough" packet:
+   - **Status** is not `Context Ready` (or already `In Progress` / `In Review`, i.e. a
+     resumed run). `Intake` means the context packet hasn't been done and signed off —
+     do not start.
+   - Section 2 is empty or still the placeholder text — Step 2 (Notion AI context
+     packet) hasn't run.
+   - **Task Type** is unset, or Section 2 defines no testable outcome and no
+     rollback / restore criterion — the task isn't specified well enough to execute.
 3. Set **Status → In Progress** via `notion-update-page`.
 
 ## 1. Trust-but-verify — the ONLY context work you spend tokens on
@@ -79,11 +86,12 @@ scripts / history. Never `grep -r` broadly on the live Unraid host (single combi
 pattern, `grep -rlI`, `--exclude-dir` for plex/frigate/media/`*.db`, `ionice -c3`, ask
 first). Never type a secret into a tool-call argument.
 
-**Risk Level** gates autonomy:
-- **Low** — proceed through validation on your own; still honour the hard-stop list.
-- **Medium** — same, but announce each irreversible step before taking it.
-- **High / Emergency** — checkpoint with Flynn before the first change that touches
-  live state, and dry-run / rehearse the rollback command before applying.
+**Autonomy** — proceed through validation on your own, honouring the hard-stop list,
+but:
+- announce each irreversible step before taking it;
+- before the first change that touches live state on anything holding persistent data
+  or an access boundary (DB schema, credentials, container volumes, firewall, DNS),
+  checkpoint with Flynn and dry-run / rehearse the rollback command first.
 
 ## 3. Validate
 
@@ -98,10 +106,10 @@ Then run the matching **Section 4** task-type checklist from the page.
 Review:
 - **Material code change** → run `/security-review` and `/code-review high`.
 - **Non-code change** → run the adversarial-review prompt in Section 4 of the page.
-- **High / Emergency risk, or a change touching persistent data or access boundaries**
-  → additionally ask Flynn to approve a **read-only** review subagent (Explore or
-  general-purpose, scoped to read-only exploration) for an independent pass. Never a
-  subagent that can edit or push under Flynn's git identity (CLAUDE.md).
+- **A change touching persistent data or an access boundary** → additionally ask Flynn
+  to approve a **read-only** review subagent (Explore or general-purpose, scoped to
+  read-only exploration) for an independent pass. Never a subagent that can edit or
+  push under Flynn's git identity (CLAUDE.md).
 - Classify findings **Blocker / Important / Minor**. Blockers must be fixed or
   explicitly waived by Flynn before closure.
 
