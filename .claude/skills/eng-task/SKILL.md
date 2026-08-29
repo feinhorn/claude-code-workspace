@@ -10,6 +10,21 @@ You do not need to open that page — everything you must do is below.
 
 Input: a **Notion Engineering Tasks page** (URL, page ID, or exact task name).
 
+## Intake mode — `/eng-task new: <one-line objective>`
+
+If the input starts with `new:` (or is plainly a request to file a task, not run one),
+create the row instead of executing:
+
+1. `notion-create-pages` under data source `collection://3c5a7685-6021-4de3-8224-db561b552ff4`
+   with **Task / Objective** = the objective, **Status** = `Intake`.
+2. Ask Flynn for **Task Type**, **System**, **Risk Level**, and any **Constraints &
+   Boundaries** — set them via `notion-update-page`. Do not guess Task Type; it shapes
+   every downstream prompt.
+3. Apply the `New Engineering Task` template (`template_id` `e01a1f96-61d6-4deb-a31e-6d9171803427`)
+   so Sections 1–5 exist on the page.
+4. Stop. Tell Flynn the page URL and that Step 2 (Notion AI context packet) is next —
+   this skill does not write the packet.
+
 ## 0. Load the task
 
 1. `notion-fetch` the page. Read **Section 2 (the context packet)** in full, plus the
@@ -83,6 +98,10 @@ Then run the matching **Section 4** task-type checklist from the page.
 Review:
 - **Material code change** → run `/security-review` and `/code-review high`.
 - **Non-code change** → run the adversarial-review prompt in Section 4 of the page.
+- **High / Emergency risk, or a change touching persistent data or access boundaries**
+  → additionally ask Flynn to approve a **read-only** review subagent (Explore or
+  general-purpose, scoped to read-only exploration) for an independent pass. Never a
+  subagent that can edit or push under Flynn's git identity (CLAUDE.md).
 - Classify findings **Blocker / Important / Minor**. Blockers must be fixed or
   explicitly waived by Flynn before closure.
 
@@ -111,8 +130,9 @@ After sign-off:
    map in Notion with verified live state, per CLAUDE.md's Homelab Documentation Rule,
    and add a session-capsule / change-log entry. If nothing needed updating, say so
    explicitly and why.
-4. **Status → In Review.** **Do not set Closed** — only Flynn closes, after final
-   verification.
+4. **Status → In Review** and set **Closed At** = today's date (this is the
+   work-complete date the `Days Open` metric uses). **Do not set Closed** — only Flynn
+   closes, after final verification.
 5. If a credential was exposed or rotated at any point, run the `rotate` skill and log it.
 
 ## Working directory
