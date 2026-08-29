@@ -143,10 +143,18 @@ After sign-off:
    - **Section 5** — durable closure record following the compiled **Closure Prompt**
      structure: outcome + rationale, what changed, validation evidence, rollback /
      restore procedure, monitoring window.
-3. **Canonical docs — hard gate.** Update the affected subsystem page(s) and the infra
-   map in Notion with verified live state, per CLAUDE.md's Homelab Documentation Rule,
-   and add a session-capsule / change-log entry. If nothing needed updating, say so
-   explicitly and why.
+3. **Canonical docs — hard gate.**
+   - Update the affected subsystem page(s) and the infra map in Notion with verified
+     live state, per CLAUDE.md's Homelab Documentation Rule. If a page genuinely needed
+     no change, name the page you checked and why — a bare "nothing needed updating" is
+     not acceptable.
+   - **Always** append a Session Memory Capsule to the **AI System Reference**
+     (`37d12807f3a281d4b180dad5bdf8e103`, its "Latest session capsules" section):
+     date, task link, areas touched, what changed, verification evidence, follow-ups.
+     Unconditional — every run writes one, a no-op investigation included.
+   - Fill the task's **Pages Updated** property (page names + links you touched) and
+     tick **Docs Synced**. The **Closure Gate** formula must read green before Flynn
+     can close.
 4. **Status → In Review** and set **Closed At** = today's date (this is the
    work-complete date the `Days Open` metric uses). **Do not set Closed** — only Flynn
    closes, after final verification.
