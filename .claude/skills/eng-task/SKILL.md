@@ -10,10 +10,24 @@ You do not need to open that page — everything you must do is below.
 
 Input: a **Notion Engineering Tasks page** (URL, page ID, or exact task name).
 
+## Resolve the input first
+
+Before anything else, decide whether the input names an **existing** Engineering Tasks
+row. Only treat it as a new-task request when it starts with `new:`, or when no
+existing row matches.
+
+- A URL or page ID → `notion-fetch` it directly.
+- Any other string → query the data source for a row whose **Task / Objective** matches
+  (exact, then `LIKE`):
+  `SELECT id, "Task / Objective", "Status" FROM "collection://3c5a7685-6021-4de3-8224-db561b552ff4" WHERE "Task / Objective" LIKE ?`
+  Exactly one match → that is the task; go to **§0**. Multiple matches → ask Flynn which.
+  Zero matches and no `new:` prefix → tell Flynn no such task exists; do not silently
+  create one.
+
 ## Intake mode — `/eng-task new: <one-line objective>`
 
-If the input starts with `new:` (or is plainly a request to file a task, not run one),
-create the row instead of executing:
+If the input starts with `new:` (or the resolve step above found no existing row and
+Flynn confirms filing a new one), create the row instead of executing:
 
 1. `notion-create-pages` under data source `collection://3c5a7685-6021-4de3-8224-db561b552ff4`
    with **Task / Objective** = the objective, **Status** = `Intake`.
@@ -25,10 +39,55 @@ create the row instead of executing:
 4. Stop. Tell Flynn the page URL and that Step 2 (Notion AI context packet) is next —
    this skill does not write the packet.
 
+## Promoting an Investigate task to Fix
+
+Use when a **concluded** Investigate task turns up a defect Flynn wants fixed in the
+same task rather than a fresh one.
+
+**Precondition — the investigation is done and signed off.** Hypotheses ruled in/out
+with timestamped evidence, findings ranked (bug / monitoring gap / optimization), and
+Flynn has confirmed *which specific findings* are being actioned. That confirmation is
+the scope-escalation approval §2 otherwise forbids — record it in Section 4.
+
+1. **Decide promote-in-place vs. new Fix task.** Promote in place only if *all* hold:
+   the fix is small and tightly scoped to one finding; the investigation evidence
+   already *is* the "characterise the defect first" artifact the Fix shape needs; and
+   the fix crosses **no** boundary the original packet's Section C fenced off.
+   File a **new Fix task** (fresh context packet) instead if the fix touches a fenced
+   boundary, needs its own validation window (e.g. a recalibration + multi-day watch),
+   bundles multiple independent fixes, or the packet's exit criteria already named it
+   as follow-up work.
+2. **Re-read the packet's Section C boundaries.** Any actioned finding whose fix
+   crosses one → new task. No exceptions without Flynn explicitly re-approving that
+   specific boundary in this session.
+3. **Flip `Task Type` → `Fix`** (`notion-update-page`).
+4. **Append a Section 2 addendum: "Fix scope (promoted from Investigate <date>)".**
+   Per actioned finding: the exact defect + citation to the investigation evidence;
+   the smallest coherent change; the testable pass/fail outcome; the concrete rollback
+   command; and an explicit **out-of-scope** list (every other finding stays untouched).
+   This addendum is the Fix workflow's defect-characterisation artifact.
+5. **Status → In Progress** (move it back if it had already reached In Review).
+6. **Execute under the Fix task-type shape** (§2): reproduce/characterise citing the
+   investigation evidence, smallest change, regression test failing-before/passing-after,
+   Section 4 Fix checklist, `/security-review` + `/code-review high` for material code,
+   Flynn diff sign-off, then closure sync.
+7. **Closure:** one record covers both phases (findings + fix). Section 5, Pages
+   Updated, Docs Synced, and the AI System Reference capsule all reflect both.
+
+**Guardrails:** the promotion is itself a scope change and needs explicit approval;
+one promotion per task (a later second finding is a new task); if the fix cannot be
+applied from the execution environment (no file access, wrong-file-write risk), that
+is a blocker to raise *before* flipping `Task Type`, not mid-fix.
+
 ## 0. Load the task
 
 1. `notion-fetch` the page. Read **Section 2 (the context packet)** in full, plus the
-   **Task Type**, **System**, and **Constraints & Boundaries** properties.
+   **Task Type**, **System**, and **Constraints & Boundaries** properties. These
+   properties are the source of truth — hydrate them straight from the fetched row.
+   **Never re-ask a field that is already populated.** For an existing task, prompt
+   only for a field that is genuinely empty (and for Task Type, only if unset — never
+   guess it). An empty **Constraints & Boundaries** is normal: fall back to the
+   packet's stated boundaries, don't prompt.
 2. **Readiness gate — if any of these fail, stop and tell Flynn what's missing.** Do
    not fix them yourself and do not proceed on a "close enough" packet:
    - **Status** is not `Context Ready` (or already `In Progress` / `In Review`, i.e. a
@@ -83,6 +142,16 @@ Task-type shape:
   (Community Applications templates only for containers, credential-per-trust-boundary,
   no WAN exposure of management surfaces); plan backup, monitoring, ingress, rollback,
   teardown before building.
+- **Add Feature** — for new capability landing *inside* an already-running,
+  already-provisioned service (no new container/port/hostname). Confirm the
+  capability doesn't already exist in the codebase; identify the shared
+  helpers/patterns to reuse rather than reinvent; respect every constraint the
+  host service's existing packet/doc already established (e.g. don't touch an
+  unrelated documented workaround). Smallest coherent change; extend the
+  service's existing regression suite rather than starting a new one. Skip the
+  Build New checklist's port/hostname/capacity/monitoring/ingress items unless
+  the feature itself adds a new external dependency, listener, or storage need
+  — most Add Feature tasks have nothing to verify there.
 - **Migrate** — preflight the target, back up the source, cut over, verify data
   integrity, hold a rollback window before retiring the source.
 - **Retire** — prove zero active consumers and approved retention, then only reversible
@@ -101,6 +170,25 @@ but:
 - before the first change that touches live state on anything holding persistent data
   or an access boundary (DB schema, credentials, container volumes, firewall, DNS),
   checkpoint with Flynn and dry-run / rehearse the rollback command first.
+
+**Editing HA config.** The HA VM config dir is reachable at **`ssh ha`** (an
+`~/.ssh/config` alias for `root@192.168.1.43:22`, key `id_ed25519_ha`, **passwordless**
+— `BatchMode=yes` works). It lands in the Advanced SSH add-on container with `/config`
+mounted — the `feinhorn/HA-Configs` git working tree (`git@github.com:feinhorn/HA-Configs.git`,
+branch `main`). **Address it as `ssh ha`, not `ssh root@192.168.1.43`** — a raw-IP
+invocation does not match the `Host ha` block and falls through to the wrong key.
+Prefer editing files here directly (normal git flow, comments/anchors preserved) over
+the MCP config API.
+
+Fall back to the MCP config API (`ha_config_set_*`) only if `ssh ha` is genuinely
+down. It writes only what HA exposes through its config API (automations/scripts that
+round-trip on `ha_config_get_*`), not `packages/*.yaml` or `editable: false` helpers,
+and it **rewrites the whole file through HA's serializer** (comments / anchors /
+formatting flattened) — so record every object changed for git reconciliation and
+confirm a current HA backup first. Note the repo often carries a pre-existing
+unrelated diff (`custom_components/ecowitt_local/`, `frigate/`) — never commit without
+Flynn's say. After any write, run `ha_get_system_health(include="config_check")` and
+reload the affected domain; never a full HA restart without approval.
 
 ## 3. Validate
 
